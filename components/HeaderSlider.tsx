@@ -34,14 +34,14 @@ const HeaderSlider = () => {
       title: "Stay Connected & Fit with Next-Gen Smartwatches",
       buttonText1: "Shop Collection",
       buttonText2: "Explore Features",
-      imgSrc: assets.header_watch_image || assets.header_headphone_image,
+      imgSrc: assets.header_headphone_image,
     },
     {
       id: 5,
       title: "Capture Every Detail with Professional Camera Gear",
       buttonText1: "Explore Now",
       buttonText2: "See Gallery",
-      imgSrc: assets.header_camera_image || assets.header_headphone_image,
+      imgSrc: assets.header_headphone_image,
     },
   ];
 
