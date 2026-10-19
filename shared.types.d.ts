@@ -33,10 +33,34 @@ export interface ProfileParams {
 export interface AddressParams {
   id: string;
   user_id: string;
-  full_name: string | null;
-  phone_number: string | null;
-  street_address: string | null;
+  address: string;
+  city: string;
+  state: string;
+  additional_info: string | null;
+  phone: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  created_at: string;
+}
+
+export interface OrderParams {
+  id: string;
+  user_id: string;
+  product_id: string;
+  quantity: number;
+  total_price: number;
+  amount_paid: number;
+  address_id: string;
+  paystack_reference: string;
+  status: string;
+  // Snapshot of the product and address at the time of purchase
+  product_name: string | null;
+  size: string | null;
+  color: string | null;
+  address: string | null;
   city: string | null;
   state: string | null;
+  phone: string | null;
   created_at: string;
+  updated_at: string | null;
 }

@@ -13,7 +13,7 @@ export async function generateMetadata({
 }: PageProps<"/products/[id]">): Promise<Metadata> {
   const { id } = await params;
   const product = await getProduct(id);
-  console.log(product);
+  // console.log(product);
   if (!product) return { title: "Product not found" };
 
   return { title: product.name, description: product.description };
@@ -24,7 +24,7 @@ export default async function page({ params }: PageProps<"/products/[id]">) {
   const product = await getProduct(id);
 
   if (!product) notFound();
-  console.log("productData:", product);
+  // console.log("productData:", product);
   return (
     <div>
       <Navbar />

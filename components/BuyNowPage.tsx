@@ -3,22 +3,28 @@
 import React, { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Minus, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import toast from "react-hot-toast";
+import { ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import { AddressParams, ProductParams } from "@/shared.types";
 import { useAuth } from "@/context/AuthContext";
 import { createClient } from "@/utils/supabase/client";
 import { formatPrice, getUnitPrice, SHIPPING_FEE } from "@/utils/pricing";
+import {
+  initializePayment,
+  verifyPayment,
+} from "@/utils/actions/payment.action";
+import AddressModal, { formatAddress } from "./AddressModal";
 
 interface BuyNowPageProps {
   product: ProductParams;
   initialQuantity: number;
-  selectedOptions: { label: string; value: string }[];
+  selectedOptions: {
+    key: "size" | "color" | "style";
+    label: string;
+    value: string;
+  }[];
 }
-
-const formatAddress = (address: AddressParams) =>
-  [address.street_address, address.city, address.state]
-    .filter(Boolean)
-    .join(", ");
 
 const BuyNowPage = ({
   product,
@@ -32,6 +38,9 @@ const BuyNowPage = ({
   const [quantity, setQuantity] = useState(() =>
     Math.min(Math.max(1, initialQuantity), Math.max(1, product.quantity)),
   );
+  const router = useRouter();
+  const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(
     null,
   );
@@ -76,15 +85,110 @@ const BuyNowPage = ({
   const addresses = addressState?.data ?? [];
   const isAddressLoading = isAuthLoading || (Boolean(userId) && !addressState);
   const selectedAddress = addresses.find((a) => a.id === selectedAddressId);
+  const isAddressSelected = Boolean(selectedAddress);
+
+  const unitPrice = getUnitPrice(product);
+  const subtotal = unitPrice * quantity;
+  const total = subtotal + SHIPPING_FEE;
+  const canPay = inStock && isAddressSelected && !isPaying;
 
   const imageUrl =
     product.image_url_array && product.image_url_array.length > 0
       ? product.image_url_array[0]
       : "/placeholder.png";
-  const unitPrice = getUnitPrice(product);
-  const subtotal = unitPrice * quantity;
-  const total = subtotal + SHIPPING_FEE;
-  const canCheckout = inStock && Boolean(selectedAddress);
+
+  const decreaseQuantity = () => {
+    if (quantity <= 1) {
+      toast.error("Quantity cannot be less than 1", { id: "quantity-min" });
+      return;
+    }
+    setQuantity(quantity - 1);
+  };
+
+  const increaseQuantity = () => {
+    if (quantity >= product.quantity) {
+      toast.error(`Only ${product.quantity} in stock`, { id: "quantity-max" });
+      return;
+    }
+    setQuantity(quantity + 1);
+  };
+
+  const handleSelectAddress = (address: AddressParams) => {
+    setSelectedAddressId(address.id);
+    setIsAddressModalOpen(false);
+  };
+
+  const handleAddressSaved = (address: AddressParams) => {
+    if (userId) {
+      setLoadedAddresses((current) => ({
+        userId,
+        data: [address, ...(current?.data ?? [])],
+        error: false,
+      }));
+    }
+    handleSelectAddress(address);
+  };
+
+  const optionValue = (key: "size" | "color") =>
+    selectedOptions.find((option) => option.key === key)?.value ?? null;
+
+  const handlePaymentSuccess = async (reference: string) => {
+    const toastId = toast.loading("Confirming your payment...");
+    try {
+      const result = await verifyPayment(reference);
+      if (result.error) {
+        toast.error(result.error, { id: toastId, duration: 8000 });
+        setIsPaying(false);
+        return;
+      }
+      toast.success("Payment successful!", { id: toastId });
+      router.push(`/orders/success?reference=${encodeURIComponent(reference)}`);
+    } catch {
+      toast.error(
+        `We couldn't confirm your payment. If you were charged, contact support with reference ${reference}.`,
+        { id: toastId, duration: 8000 },
+      );
+      setIsPaying(false);
+    }
+  };
+
+  const handlePayNow = async () => {
+    if (!canPay || !selectedAddress) return;
+    setIsPaying(true);
+
+    try {
+      const payment = await initializePayment({
+        productId: product.id,
+        quantity,
+        addressId: selectedAddress.id,
+        size: optionValue("size"),
+        color: optionValue("color"),
+      });
+      if (payment.error || !payment.accessCode) {
+        toast.error(payment.error ?? "We couldn't start the payment.");
+        setIsPaying(false);
+        return;
+      }
+
+      // Loaded on demand because the SDK touches window as soon as it's imported
+      const { default: PaystackPop } = await import("@paystack/inline-js");
+      new PaystackPop().resumeTransaction(payment.accessCode, {
+        onSuccess: ({ reference }) => handlePaymentSuccess(reference),
+        onCancel: () => {
+          toast.error("Payment cancelled.");
+          setIsPaying(false);
+        },
+        onError: ({ message }) => {
+          toast.error(message || "Paystack couldn't load. Please try again.");
+          setIsPaying(false);
+        },
+      });
+    } catch (error) {
+      console.error("Error starting payment:", error);
+      toast.error("We couldn't start the payment. Please try again.");
+      setIsPaying(false);
+    }
+  };
 
   return (
     <section className="w-full max-w-7xl mx-auto px-4 sm:px-8 py-12">
@@ -130,25 +234,26 @@ const BuyNowPage = ({
             <div className="flex items-center justify-between sm:flex-col sm:items-end gap-3">
               <div className="flex items-center border border-zinc-200 rounded">
                 <button
-                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                  disabled={!inStock || quantity <= 1}
+                  onClick={decreaseQuantity}
+                  disabled={!inStock || isPaying}
                   aria-label="Decrease quantity"
                   className="p-2 text-zinc-600 hover:text-black disabled:opacity-40 transition-colors"
                 >
-                  <Minus className="w-4 h-4" />
+                  <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span className="w-10 text-center text-sm font-medium text-zinc-900">
+                <span
+                  aria-live="polite"
+                  className="w-10 text-center text-sm font-medium text-zinc-900"
+                >
                   {quantity}
                 </span>
                 <button
-                  onClick={() =>
-                    setQuantity((q) => Math.min(product.quantity, q + 1))
-                  }
-                  disabled={!inStock || quantity >= product.quantity}
+                  onClick={increaseQuantity}
+                  disabled={!inStock || isPaying}
                   aria-label="Increase quantity"
                   className="p-2 text-zinc-600 hover:text-black disabled:opacity-40 transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
+                  <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
               <p className="text-sm font-semibold text-zinc-900">
@@ -162,60 +267,41 @@ const BuyNowPage = ({
         <aside className="border border-zinc-200 rounded-md p-5 h-fit space-y-6">
           <h2 className="text-base font-medium text-zinc-900">Order Summary</h2>
 
-          {/* Address Picker */}
+          {/* Select Address Bar */}
           <div>
-            <p className="text-xs font-medium text-zinc-500 mb-3">
+            <p className="text-xs font-medium text-zinc-500 mb-2">
               Delivery address
             </p>
-
-            {isAddressLoading ? (
-              <p className="text-xs text-zinc-400">Loading addresses...</p>
-            ) : addressState?.error ? (
-              <p className="text-xs text-red-600">
-                We couldn&apos;t load your addresses. Please refresh the page.
-              </p>
-            ) : addresses.length === 0 ? (
-              <p className="text-xs text-zinc-500">
-                You don&apos;t have any saved addresses yet.
-              </p>
-            ) : (
-              <div className="space-y-2" role="radiogroup">
-                {addresses.map((address) => (
-                  <label
-                    key={address.id}
-                    className={`flex gap-3 p-3 border rounded-md cursor-pointer transition-colors ${
-                      selectedAddressId === address.id
-                        ? "border-zinc-900"
-                        : "border-zinc-200 hover:border-zinc-400"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="address"
-                      value={address.id}
-                      checked={selectedAddressId === address.id}
-                      onChange={() => setSelectedAddressId(address.id)}
-                      className="mt-0.5 accent-zinc-900"
-                    />
-                    <span className="text-xs leading-relaxed">
-                      {address.full_name && (
-                        <span className="block font-medium text-zinc-900">
-                          {address.full_name}
-                        </span>
-                      )}
-                      <span className="block text-zinc-600">
-                        {formatAddress(address)}
-                      </span>
-                      {address.phone_number && (
-                        <span className="block text-zinc-500">
-                          {address.phone_number}
-                        </span>
-                      )}
+            <button
+              onClick={() => setIsAddressModalOpen(true)}
+              disabled={isAuthLoading || isPaying}
+              className={`w-full flex items-start gap-3 text-left p-3 border rounded-md transition-colors disabled:opacity-50 ${
+                selectedAddress
+                  ? "border-zinc-900"
+                  : "border-zinc-200 hover:border-zinc-400"
+              }`}
+            >
+              <MapPin className="w-4 h-4 mt-0.5 shrink-0 text-zinc-500" />
+              <span className="flex-1 min-w-0 text-sm">
+                {selectedAddress ? (
+                  <>
+                    <span className="block text-zinc-900 line-clamp-2">
+                      {formatAddress(selectedAddress)}
                     </span>
-                  </label>
-                ))}
-              </div>
-            )}
+                    {selectedAddress.additional_info && (
+                      <span className="block text-xs text-zinc-500 line-clamp-1">
+                        {selectedAddress.additional_info}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-zinc-500">Select Address</span>
+                )}
+              </span>
+              <span className="text-xs font-medium text-zinc-700 shrink-0">
+                {selectedAddress ? "Change" : "Select"}
+              </span>
+            </button>
           </div>
 
           {/* Totals */}
@@ -236,18 +322,37 @@ const BuyNowPage = ({
             </dd>
           </dl>
 
-          <button
-            disabled={!canCheckout}
-            className="w-full px-6 py-2.5 text-sm font-medium text-white bg-zinc-900 hover:bg-black rounded-md transition-colors disabled:opacity-50 disabled:hover:bg-zinc-900 disabled:cursor-not-allowed"
-          >
-            {!inStock
-              ? "Out of stock"
-              : selectedAddress
-                ? `Checkout · ${formatPrice(total)}`
-                : "Please Select An Address To Continue"}
-          </button>
+          <div className="space-y-2">
+            <button
+              onClick={handlePayNow}
+              disabled={!canPay}
+              className="w-full px-6 py-2.5 text-sm font-medium text-white bg-zinc-900 hover:bg-black rounded-md transition-colors disabled:opacity-50 disabled:hover:bg-zinc-900 disabled:cursor-not-allowed"
+            >
+              {!inStock
+                ? "Out of stock"
+                : isPaying
+                  ? "Processing payment..."
+                  : `Pay Now · ${formatPrice(total)}`}
+            </button>
+            {inStock && !isAddressSelected && (
+              <p className="text-xs text-center text-red-600">
+                **Please Select An Address To Continue
+              </p>
+            )}
+          </div>
         </aside>
       </div>
+
+      <AddressModal
+        isOpen={isAddressModalOpen}
+        onClose={() => setIsAddressModalOpen(false)}
+        addresses={addresses}
+        isLoading={isAddressLoading}
+        hasError={Boolean(addressState?.error)}
+        selectedAddressId={selectedAddressId}
+        onSelect={handleSelectAddress}
+        onAddressSaved={handleAddressSaved}
+      />
     </section>
   );
 };

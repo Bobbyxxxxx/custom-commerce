@@ -36,7 +36,7 @@ export default async function BuyNow({
   ).flatMap((key) => {
     const value = firstValue(query[key]);
     return value && productOptions[key].includes(value)
-      ? [{ label: OPTION_LABELS[key], value }]
+      ? [{ key, label: OPTION_LABELS[key], value }]
       : [];
   });
 

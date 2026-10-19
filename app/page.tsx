@@ -6,7 +6,7 @@ import React from "react";
 import { createClient } from "@/utils/supabase/server";
 const allProducts = await fetchProducts();
 
-console.log(allProducts);
+// console.log(allProducts);
 export default async function page() {
   const supabase = await createClient();
 
